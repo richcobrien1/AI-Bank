@@ -1,0 +1,39 @@
+{
+  "name": "Avatar Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "avatar-webhook"
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "webhook-avatar-001"
+    },
+    {
+      "parameters": {
+        "functionCode": "return items.map(item => { item.json.avatarProcessed = true; return item; });"
+      },
+      "name": "Function",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "id": "function-avatar-001"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Function",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
