@@ -1,0 +1,711 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "entry-detected",
+        "responseMode": "onReceived"
+      },
+      "id": "1",
+      "name": "Webhook_Entry_Detected",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 100]
+    },
+    {
+      "parameters": {
+        "url": "http://kyc-service:8080/verify",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "face_hash",
+              "value": "{{ $json.image_token }}"
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "Call_KYC_Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [300, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "{{ $node['Call_KYC_Service'].json.matched }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "3",
+      "name": "Check_KYC_Result",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 100]
+    },
+    {
+      "parameters": {
+        "url": "http://core-banking:8080/profile",
+        "method": "GET",
+        "authentication": "none",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $node['Call_KYC_Service'].json.user_id }}"
+            }
+          ]
+        }
+      },
+      "id": "4",
+      "name": "Fetch_Core_Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [700, 100]
+    },
+    {
+      "parameters": {
+        "url": "http://reco-engine:8080/next-best-action",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $node['Call_KYC_Service'].json.user_id }}"
+            },
+            {
+              "name": "context",
+              "value": "{{ $node['Fetch_Core_Profile'].json }}"
+            }
+          ]
+        }
+      },
+      "id": "5",
+      "name": "Call_Recommendation_Engine",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [900, 100]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "session:{{ $node['Call_KYC_Service'].json.user_id }}",
+        "value": "{{ JSON.stringify({ profile: $node['Fetch_Core_Profile'].json, reco: $node['Call_Recommendation_Engine'].json }) }}",
+        "expire": true,
+        "ttl": 3600
+      },
+      "id": "6",
+      "name": "Store_Session_Context",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "mode": "rule",
+        "rules": {
+          "string": [
+            {
+              "value1": "{{ $node['Call_Recommendation_Engine'].json.action }}",
+              "value2": "kiosk",
+              "output": 0
+            },
+            {
+              "value1": "{{ $node['Call_Recommendation_Engine'].json.action }}",
+              "value2": "staff",
+              "output": 1
+            }
+          ]
+        }
+      },
+      "id": "7",
+      "name": "Route_To_Touchpoint",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [1300, 100]
+    },
+    {
+      "parameters": {
+        "url": "http://kiosk:8080/session",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_id",
+              "value": "{{ $node['Call_KYC_Service'].json.user_id }}"
+            },
+            {
+              "name": "action",
+              "value": "{{ $node['Call_Recommendation_Engine'].json }}"
+            }
+          ]
+        }
+      },
+      "id": "8",
+      "name": "Notify_Kiosk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1500, 50]
+    },
+    {
+      "parameters": {
+        "url": "http://staff-tablet:8080/session",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_id",
+              "value": "{{ $node['Call_KYC_Service'].json.user_id }}"
+            },
+            {
+              "name": "action",
+              "value": "{{ $node['Call_Recommendation_Engine'].json }}"
+            }
+          ]
+        }
+      },
+      "id": "9",
+      "name": "Notify_Staff_Tablet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1500, 150]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "session-start",
+        "responseMode": "onReceived"
+      },
+      "id": "10",
+      "name": "Webhook_Session_Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "session:{{ $json.user_id }}"
+      },
+      "id": "11",
+      "name": "Fetch_Session_Context",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://claude-api:8080/process",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "{{ $json.input_text }}"
+            },
+            {
+              "name": "context",
+              "value": "{{ $node['Fetch_Session_Context'].json }}"
+            },
+            {
+              "name": "pii_token",
+              "value": "{{ $json.pii_token }}"
+            }
+          ]
+        }
+      },
+      "id": "12",
+      "name": "Call_Claude_NLP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "mode": "rule",
+        "rules": {
+          "string": [
+            {
+              "value1": "{{ $node['Call_Claude_NLP'].json.intent }}",
+              "value2": "balance",
+              "output": 0
+            },
+            {
+              "value1": "{{ $node['Call_Claude_NLP'].json.intent }}",
+              "value2": "transfer",
+              "output": 1
+            },
+            {
+              "value1": "{{ $node['Call_Claude_NLP'].json.intent }}",
+              "value2": "escalate",
+              "output": 2
+            }
+          ]
+        }
+      },
+      "id": "13",
+      "name": "Map_Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://core-banking:8080/balance",
+        "method": "GET",
+        "authentication": "none",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            }
+          ]
+        }
+      },
+      "id": "14",
+      "name": "Get_Balance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [900, 250]
+    },
+    {
+      "parameters": {
+        "url": "http://core-banking:8080/transfer",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            },
+            {
+              "name": "amount",
+              "value": "{{ $node['Call_Claude_NLP'].json.amount }}"
+            },
+            {
+              "name": "to_account",
+              "value": "{{ $node['Call_Claude_NLP'].json.to_account }}"
+            }
+          ]
+        }
+      },
+      "id": "15",
+      "name": "Perform_Transfer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [900, 350]
+    },
+    {
+      "parameters": {
+        "url": "http://kyc-service:8080/2fa",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            },
+            {
+              "name": "method",
+              "value": "sms"
+            }
+          ]
+        }
+      },
+      "id": "16",
+      "name": "Perform_2FA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [800, 350]
+    },
+    {
+      "parameters": {
+        "url": "http://datalake:8080/log",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "transaction_id",
+              "value": "{{ $node['Perform_Transfer'].json.transaction_id }}"
+            },
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            },
+            {
+              "name": "type",
+              "value": "transfer"
+            },
+            {
+              "name": "timestamp",
+              "value": "{{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "17",
+      "name": "Log_Transaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1100, 350]
+    },
+    {
+      "parameters": {
+        "url": "http://crm:8080/case",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            },
+            {
+              "name": "context",
+              "value": "{{ $node['Fetch_Session_Context'].json }}"
+            },
+            {
+              "name": "recording",
+              "value": "{{ $json.recording_url }}"
+            },
+            {
+              "name": "reason",
+              "value": "escalation"
+            }
+          ]
+        }
+      },
+      "id": "18",
+      "name": "Create_CRM_Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [900, 450]
+    },
+    {
+      "parameters": {
+        "trigger": {
+          "kafka": {
+            "topic": "high_risk_tx",
+            "bootstrapServers": "kafka:9092",
+            "groupId": "n8n-fraud-consumer"
+          }
+        }
+      },
+      "id": "19",
+      "name": "Stream_High_Risk_Tx",
+      "type": "n8n-nodes-base.kafkaTrigger",
+      "typeVersion": 1,
+      "position": [100, 500]
+    },
+    {
+      "parameters": {
+        "url": "http://iva:8080/correlate",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "transaction_id",
+              "value": "{{ $json.transaction_id }}"
+            },
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            }
+          ]
+        }
+      },
+      "id": "20",
+      "name": "Behavioral_Correlation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [300, 500]
+    },
+    {
+      "parameters": {
+        "url": "http://geo-service:8080/verify",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "transaction_id",
+              "value": "{{ $json.transaction_id }}"
+            },
+            {
+              "name": "location",
+              "value": "{{ $json.location }}"
+            }
+          ]
+        }
+      },
+      "id": "21",
+      "name": "Geolocation_Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [500, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "{{ $node['Behavioral_Correlation'].json.risk_score > 0.8 && $node['Geolocation_Check'].json.is_valid }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "22",
+      "name": "Evaluate_Risk",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [700, 500]
+    },
+    {
+      "parameters": {
+        "url": "http://core-banking:8080/hold",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "transaction_id",
+              "value": "{{ $json.transaction_id }}"
+            },
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            }
+          ]
+        }
+      },
+      "id": "23",
+      "name": "Place_Hold",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [900, 450]
+    },
+    {
+      "parameters": {
+        "url": "http://crm:8080/case",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            },
+            {
+              "name": "transaction_id",
+              "value": "{{ $json.transaction_id }}"
+            },
+            {
+              "name": "reason",
+              "value": "fraud_alert"
+            },
+            {
+              "name": "risk_score",
+              "value": "{{ $node['Behavioral_Correlation'].json.risk_score }}"
+            }
+          ]
+        }
+      },
+      "id": "24",
+      "name": "Create_CRM_Case_Fraud",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1100, 450]
+    },
+    {
+      "parameters": {
+        "url": "http://notification:8080/send",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "{{ $json.user_id }}"
+            },
+            {
+              "name": "channel",
+              "value": "{{ $json.preferred_channel }}"
+            },
+            {
+              "name": "message",
+              "value": "Suspicious transaction detected. Please contact support."
+            }
+          ]
+        }
+      },
+      "id": "25",
+      "name": "Notify_Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1300, 450]
+    },
+    {
+      "parameters": {
+        "url": "http://core-banking:8080/clear",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "transaction_id",
+              "value": "{{ $json.transaction_id }}"
+            }
+          ]
+        }
+      },
+      "id": "26",
+      "name": "Clear_Transaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [900, 550]
+    },
+    {
+      "parameters": {
+        "url": "http://datalake:8080/feedback",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "transaction_id",
+              "value": "{{ $json.transaction_id }}"
+            },
+            {
+              "name": "label",
+              "value": "false_positive"
+            },
+            {
+              "name": "timestamp",
+              "value": "{{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "27",
+      "name": "Update_ML_Feedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1100, 550]
+    }
+  ],
+  "connections": {
+    "Webhook_Entry_Detected": {
+      "main": [[{ "node": "Call_KYC_Service", "type": "main", "index": 0 }]]
+    },
+    "Call_KYC_Service": {
+      "main": [[{ "node": "Check_KYC_Result", "type": "main", "index": 0 }]]
+    },
+    "Check_KYC_Result": {
+      "main": [
+        [{ "node": "Fetch_Core_Profile", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Fetch_Core_Profile": {
+      "main": [[{ "node": "Call_Recommendation_Engine", "type": "main", "index": 0 }]]
+    },
+    "Call_Recommendation_Engine": {
+      "main": [[{ "node": "Store_Session_Context", "type": "main", "index": 0 }]]
+    },
+    "Store_Session_Context": {
+      "main": [[{ "node": "Route_To_Touchpoint", "type": "main", "index": 0 }]]
+    },
+    "Route_To_Touchpoint": {
+      "main": [
+        [{ "node": "Notify_Kiosk", "type": "main", "index": 0 }],
+        [{ "node": "Notify_Staff_Tablet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook_Session_Start": {
+      "main": [[{ "node": "Fetch_Session_Context", "type": "main", "index": 0 }]]
+    },
+    "Fetch_Session_Context": {
+      "main": [[{ "node": "Call_Claude_NLP", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_NLP": {
+      "main": [[{ "node": "Map_Intent", "type": "main", "index": 0 }]]
+    },
+    "Map_Intent": {
+      "main": [
+        [{ "node": "Get_Balance", "type": "main", "index": 0 }],
+        [{ "node": "Perform_2FA", "type": "main", "index": 0 }],
+        [{ "node": "Create_CRM_Case", "type": "main", "index": 0 }]
+      ]
+    },
+    "Perform_2FA": {
+      "main": [[{ "node": "Perform_Transfer", "type": "main", "index": 0 }]]
+    },
+    "Perform_Transfer": {
+      "main": [[{ "node": "Log_Transaction", "type": "main", "index": 0 }]]
+    },
+    "Stream_High_Risk_Tx": {
+      "main": [[{ "node": "Behavioral_Correlation", "type": "main", "index": 0 }]]
+    },
+    "Behavioral_Correlation": {
+      "main": [[{ "node": "Geolocation_Check", "type": "main", "index": 0 }]]
+    },
+    "Geolocation_Check": {
+      "main": [[{ "node": "Evaluate_Risk", "type": "main", "index": 0 }]]
+    },
+    "Evaluate_Risk": {
+      "main": [
+        [{ "node": "Place_Hold", "type": "main", "index": 0 }],
+        [{ "node": "Clear_Transaction", "type": "main", "index": 0 }]
+      ]
+    },
+    "Place_Hold": {
+      "main": [[{ "node": "Create_CRM_Case_Fraud", "type": "main", "index": 0 }]]
+    },
+    "Create_CRM_Case_Fraud": {
+      "main": [[{ "node": "Notify_Customer", "type": "main", "index": 0 }]]
+    },
+    "Clear_Transaction": {
+      "main": [[{ "node": "Update_ML_Feedback", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "timezone": "UTC",
+    "errorWorkflow": "",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "active": false,
+  "name": "AI_Bank_Workflows"
+}
